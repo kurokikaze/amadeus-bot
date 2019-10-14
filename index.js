@@ -30,6 +30,8 @@ function flatten(ary) {
     return ret;
 }
 
+const findVeins = (map) => flatten(map).filter((cell) => cell.ore > 0).sort((a, b) => a.x - b.x);
+
 const dist = ({ x: x1, y: y1 }, { x: x2, y: y2 }) => Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 
 const getShiftedPoi = (id, { x, y }) => {
@@ -71,7 +73,7 @@ class Dispatcher {
     }
 
     setScout(robotScout) {
-        for (let robot of this.robots) {
+        for (const robot of this.robots) {
             if (robot.id === robotScout.id) {
                 robot.setRole(ROLE_SCOUT);
             } else {
@@ -84,8 +86,8 @@ class Dispatcher {
     }
 
     isScoutDead() {
-        for (let robot of this.robots) {
-            if (robot.role === ROLE_SCOUT && robot.x == -1 && robot.y == -1) {
+        for (const robot of this.robots) {
+            if (robot.role === ROLE_SCOUT && robot.x === -1 && robot.y === -1) {
                 return true;
             }
         }
@@ -179,161 +181,152 @@ class Robot {
     }
 
     getCommand() {
-        if (this.x == -1 && this.y == -1) {
+        if (this.x === -1 && this.y === -1) {
             return 'WAIT'; // Don't waste time on dead
         }
         switch (this.role) {
-            case ROLE_SCOUT:
-                if (this.mode === 'DIG_AFTER_SCOUTING') {
-                    if (this.item === -1) {
-                        this.setPoiToMyVein();
-                        if (this.poiReachable()) {
-                            this.mode = '';
-                            const digPoint = {
-                                x: this.poi.x,
-                                y: this.poi.y,
-                            };
-                            this.poi = {x: 0, y: this.y};
-                            return `DIG ${digPoint.x} ${digPoint.y}`;
-                        } else {
-                            return `MOVE ${this.poi.x} ${this.poi.y}`;
-                        }
-                    } else {
+        case ROLE_SCOUT:
+            if (this.mode === 'DIG_AFTER_SCOUTING') {
+                if (this.item === -1) {
+                    this.setPoiToMyVein();
+                    if (this.poiReachable()) {
                         this.mode = '';
-                        this.poi = {x: 0, y: this.y};
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
-                    }
-                }
-                console.error(`Scout status: ${this.x}, ${this.y} : ${this.item}`);
-                if (this.item == -1) {
-                    if (this.x === 0) {
-                        if (prospectorPoints.length > 0) {
-                            const point = prospectorPoints.pop();
-                            this.poi = {x: point.x, y: point.y};
-                        }
-                        console.error(`Dispatching RESET WAIT to ${global.dispatcher.robots.length} robots`);
-                        global.dispatcher.unsetMode('WAIT_FOR_ORE');
-                        return 'REQUEST RADAR';                        
-                    } else {
-                        if (prospectorPoints.length === 0) {
-                            this.role = ROLE_DIGGER;
-                            this.setPoiToMyVein();
-                            return `MOVE ${this.poi.x} ${this.poi.y}`;
-                        }
-                        this.poi = {x:0, y: this.y};
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
-                    }
-                } else {
-                    if (!this.poiReachable()) {
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
-                    } else {
-                        // Do not return empty
-                        this.mode = 'DIG_AFTER_SCOUTING';
-                        // Remove WAIT_FOR_ORE mode so if no ore is found, diggers will follow Scout
                         const digPoint = {
-                                x: this.poi.x,
-                                y: this.poi.y,
-                            };
+                            x: this.poi.x,
+                            y: this.poi.y,
+                        };
+                        this.poi = { x: 0, y: this.y };
                         return `DIG ${digPoint.x} ${digPoint.y}`;
                     }
+                    return `MOVE ${this.poi.x} ${this.poi.y}`;
                 }
-                break;
-            case ROLE_DIGGER:
-                if (this.mode === 'WAIT_FOR_ORE') {
+                this.mode = '';
+                this.poi = { x: 0, y: this.y };
+                return `MOVE ${this.poi.x} ${this.poi.y}`;
+            }
+            console.error(`Scout status: ${this.x}, ${this.y} : ${this.item}`);
+            if (this.item === -1) {
+                if (this.x === 0) {
+                    if (prospectorPoints.length > 0) {
+                        const point = prospectorPoints.pop();
+                        this.poi = { x: point.x, y: point.y };
+                    }
+                    console.error(`Dispatching RESET WAIT to ${global.dispatcher.robots.length} robots`);
+                    global.dispatcher.unsetMode('WAIT_FOR_ORE');
+                    return 'REQUEST RADAR';
+                }
+                if (prospectorPoints.length === 0) {
+                    this.role = ROLE_DIGGER;
+                    this.setPoiToMyVein();
+                    return `MOVE ${this.poi.x} ${this.poi.y}`;
+                }
+                this.poi = { x: 0, y: this.y };
+                return `MOVE ${this.poi.x} ${this.poi.y}`;
+            }
+
+            if (!this.poiReachable()) {
+                return `MOVE ${this.poi.x} ${this.poi.y}`;
+            }
+            // Do not return empty
+            this.mode = 'DIG_AFTER_SCOUTING';
+            // Remove WAIT_FOR_ORE mode so if no ore is found, diggers will follow Scout
+            return `DIG ${this.poi.x} ${this.poi.y}`;
+        case ROLE_DIGGER:
+            if (this.mode === 'WAIT_FOR_ORE') {
+                const result = this.setPoiToMyVein();
+                if (result) {
+                    this.mode = '';
+                    return `MOVE ${this.poi.x} ${this.poi.y}`;
+                }
+
+                return 'WAIT';
+            }
+            if (this.mode === 'MOVE_AND_WAIT' && this.onPoi()) {
+                this.mode = 'WAIT_FOR_ORE';
+                return 'WAIT';
+            }
+
+            if (this.item === -1) {
+                if (this.x === 0) {
                     const result = this.setPoiToMyVein();
                     if (result) {
                         this.mode = '';
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
                     } else {
-                        return 'WAIT';
+                        this.setBackupPoi();
                     }
+                    return `MOVE ${this.poi.x} ${this.poi.y}`;
                 }
-                if (this.mode === 'MOVE_AND_WAIT' && this.onPoi()) {
-                    this.mode = 'WAIT_FOR_ORE';
-                    return 'WAIT';
-                }
-                
-                if (this.item == -1) {
-                    if (this.x === 0) {
-                        const result = this.setPoiToMyVein();
-                        if (result) {
-                            this.mode = '';
-                        } else {
-                            this.setBackupPoi();
-                        }
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
-                    }
 
-                    if (this.poi.x === 0) {
-                        const result = this.setPoiToMyVein();
-                        if (result) {
-                            this.mode = '';
-                        } else {
-                            this.setBackupPoi();
-                        }
-                    }
-                    
-                    if (!this.poiReachable()) {
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
+                if (this.poi.x === 0) {
+                    const result = this.setPoiToMyVein();
+                    if (result) {
+                        this.mode = '';
                     } else {
-                        const digPoint = {
-                                x: this.poi.x,
-                                y: this.poi.y,
-                            };
-                        // this.poi = {x: 0, y: this.y};
-                        if (this.mode == 'PROSPECTING') {
-                            if (findVeins(this.map).length > 0) {
-                                const result = this.setPoiToMyVein();
-                                if (!result) {
-                                    this.poi = getShiftedPoi(this.id, this.poi);
-                                } else {
-                                    this.resetMode();
-                                }
-                            } else {
-                                this.poi = getShiftedPoi(this.id, this.poi);
-                            }
-                        }
-                        return `DIG ${digPoint.x} ${digPoint.y}`;
+                        this.setBackupPoi();
                     }
-                } else {
-                    if (this.x === 0) {
-                        const result = this.setPoiToMyVein(); 
+                }
+
+                if (!this.poiReachable()) {
+                    return `MOVE ${this.poi.x} ${this.poi.y}`;
+                }
+
+                const digPoint = {
+                    x: this.poi.x,
+                    y: this.poi.y,
+                };
+                    // this.poi = {x: 0, y: this.y};
+                if (this.mode === 'PROSPECTING') {
+                    if (findVeins(this.map).length > 0) {
+                        const result = this.setPoiToMyVein();
                         if (!result) {
-                            this.setBackupPoi();
-                        }
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
-                    } 
-                        this.poi = {x:0, y: this.y};
-                        if (this.mode == 'PROSPECTING') {
+                            this.poi = getShiftedPoi(this.id, this.poi);
+                        } else {
                             this.resetMode();
                         }
-                        return `MOVE ${this.poi.x} ${this.poi.y}`;
-                    
+                    } else {
+                        this.poi = getShiftedPoi(this.id, this.poi);
+                    }
                 }
+
+                return `DIG ${digPoint.x} ${digPoint.y}`;
+            }
+
+            if (this.x === 0) {
+                const result = this.setPoiToMyVein();
+                if (!result) {
+                    this.setBackupPoi();
+                }
+                return `MOVE ${this.poi.x} ${this.poi.y}`;
+            }
+
+            this.poi = { x: 0, y: this.y };
+
+            if (this.mode === 'PROSPECTING') {
+                this.resetMode();
+            }
+            return `MOVE ${this.poi.x} ${this.poi.y}`;
+        default:
+            return 'WAIT';
         }
     }
 }
 
-
-const findVeins = (map) => flatten(map).filter((cell) => cell.ore > 0).sort((a, b) => a.x - b.x);
-
 const ENTITY_ROBOT = 0;
-const ENTITY_ENEMY = 1;
-const ENTITY_RADAR = 2;
-const ENTITY_TRAP = 3;
-const ENTITY_ORE = 4;
 
 const mapDataInputs = readline().split(' ');
-const width = parseInt(mapDataInputs[0]);
-const height = parseInt(mapDataInputs[1]); // size of the map
+const width = parseInt(mapDataInputs[0], 10);
+const height = parseInt(mapDataInputs[1], 10); // size of the map
 
 const readEntity = () => {
     const entityInputs = readline().split(' ');
-    const id = parseInt(entityInputs[0]); // unique id of the entity
-    const type = parseInt(entityInputs[1]); // 0 for your robot, 1 for other robot, 2 for radar, 3 for trap
-    const x = parseInt(entityInputs[2]);
-    const y = parseInt(entityInputs[3]); // position of the entity
-    const item = parseInt(entityInputs[4]); // if this entity is a robot, the item it is carrying (-1 for NONE, 2 for RADAR, 3 for TRAP, 4 for ORE)
+    const id = parseInt(entityInputs[0], 10); // unique id of the entity
+    // 0 for your robot, 1 for other robot, 2 for radar, 3 for trap
+    const type = parseInt(entityInputs[1], 10);
+    const x = parseInt(entityInputs[2], 10);
+    const y = parseInt(entityInputs[3], 10); // position of the entity
+    // if this entity is a robot, the item it is carrying
+    // (-1 for NONE, 2 for RADAR, 3 for TRAP, 4 for ORE)
+    const item = parseInt(entityInputs[4], 10);
     return {
         id,
         type,
@@ -345,9 +338,9 @@ const readEntity = () => {
 
 const readEntityData = () => {
     const inputs = readline().split(' ');
-    const entityCount = parseInt(inputs[0]); // number of entities visible to you
-    const radarCooldown = parseInt(inputs[1]); // turns left until a new radar can be requested
-    const trapCooldown = parseInt(inputs[2]); // turns left until a new trap can be requested
+    const entityCount = parseInt(inputs[0], 10); // number of entities visible to you
+    const radarCooldown = parseInt(inputs[1], 10); // turns left until a new radar can be requested
+    const trapCooldown = parseInt(inputs[2], 10); // turns left until a new trap can be requested
 
     return {
         entityCount,
@@ -358,12 +351,12 @@ const readEntityData = () => {
 
 const readMap = () => {
     const map = [];
-    for (let i = 0; i < height; i++) {
-        let inputs = readline().split(' ');
+    for (let i = 0; i < height; i += 1) {
+        const inputs = readline().split(' ');
         map[i] = [];
-        for (let j = 0; j < width; j++) {
+        for (let j = 0; j < width; j += 1) {
             const ore = inputs[2 * j];// amount of ore or "?" if unknown
-            const hole = parseInt(inputs[2 * j + 1]);// 1 if cell has a hole
+            const hole = parseInt(inputs[2 * j + 1], 10);// 1 if cell has a hole
             map[i][j] = {
                 x: j,
                 y: i,
@@ -375,12 +368,12 @@ const readMap = () => {
     return map;
 };
 
-let myRobots = [];
-let entities = [];
+const myRobots = [];
+const entities = [];
 
 global.dispatcher = new Dispatcher();
 
-for (let i = 0; i < 5; i++) {
+for (let i = 0; i < 5; i += 1) {
     myRobots[i] = new Robot(i);
     if (i > 0) {
         myRobots[i].setLeader(myRobots[0]);
@@ -390,17 +383,19 @@ for (let i = 0; i < 5; i++) {
 
 // game loop
 while (true) {
-    let inputs = readline().split(' ');
-    const myScore = parseInt(inputs[0]); // Amount of ore delivered
-    const opponentScore = parseInt(inputs[1]);
+    /* eslint-disable no-unused-vars */
+    const inputs = readline().split(' ');
+    const myScore = parseInt(inputs[0], 10); // Amount of ore delivered
+    const opponentScore = parseInt(inputs[1], 10);
     const map = readMap();
     const {
         entityCount,
         radarCooldown,
         trapCooldown,
     } = readEntityData();
+    /* eslint-enable no-unused-vars */
     let myRobotIndex = 0;
-    for (let i = 0; i < entityCount; i++) {
+    for (let i = 0; i < entityCount; i += 1) {
         const entity = readEntity();
         if (entity.type === ENTITY_ROBOT) {
             myRobots[myRobotIndex].setGameId(entity.id);
@@ -413,9 +408,7 @@ while (true) {
     if (global.dispatcher.isScoutDead()) {
         global.dispatcher.setScout(global.dispatcher.getAliveRobot());
     }
-    for (let i = 0; i < 5; i++) {
-        // if (!myRobots[i].isDead()) {
+    for (let i = 0; i < 5; i += 1) {
         console.log(myRobots[i].getCommand());
-        // }
     }
 }
