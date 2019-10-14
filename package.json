@@ -1,0 +1,19 @@
+{
+  "name": "amadeus-bot",
+  "version": "0.1.0",
+  "description": "Bot for codingame Amadeus challenge",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "author": "kurokikaze@yandex.ru",
+  "license": "MIT",
+  "dependencies": {
+    "flow": "^0.2.3"
+  },
+  "devDependencies": {
+    "eslint": "^6.5.1",
+    "eslint-config-airbnb-base": "^14.0.0",
+    "eslint-plugin-import": "^2.18.2"
+  }
+}
