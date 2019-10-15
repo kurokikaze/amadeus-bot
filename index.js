@@ -4,6 +4,7 @@
 const ROLE_SCOUT = 0;
 const ROLE_DIGGER = 1;
 
+// Точки на которые будут ставится радары. Берутся по порядку снизу вверх.
 const prospectorPoints = [
     { x: 29, y: 11 },
     { x: 23, y: 12 },
@@ -30,10 +31,14 @@ function flatten(ary) {
     return ret;
 }
 
+// Находит клетки с известной рудой и упорядочивает по близости к базе (левый край)
 const findVeins = (map) => flatten(map).filter((cell) => cell.ore > 0).sort((a, b) => a.x - b.x);
 
 const dist = ({ x: x1, y: y1 }, { x: x2, y: y2 }) => Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 
+// Сдвигает точку в зависимости от id робота - 1 идёт налево, 2 наверх, 3 направо и 4 вниз
+// Изначально в режиме PROSPECTING роботы так раскапывали неизвестные клетки - каждый в
+// своём направлении
 const getShiftedPoi = (id, { x, y }) => {
     switch (id) {
     case 1:
@@ -49,6 +54,9 @@ const getShiftedPoi = (id, { x, y }) => {
     }
 };
 
+/*
+ *  Диспетчер. Здесь всё взаимодействие между роботами.
+ */
 class Dispatcher {
     constructor() {
         this.robots = [];
@@ -58,6 +66,8 @@ class Dispatcher {
         this.robots.push(robot);
     }
 
+    // Выводит всех роботов из определённого режима.
+    // Чаще всего из режима случайного поиска как только будут обнаружены клетки с рудой
     unsetMode(mode) {
         if (this.robots && this.robots.length > 0) {
             for (const robot of this.robots) {
@@ -72,6 +82,7 @@ class Dispatcher {
         }
     }
 
+    // Назначает переданного робота скаутом
     setScout(robotScout) {
         for (const robot of this.robots) {
             if (robot.id === robotScout.id) {
@@ -85,6 +96,7 @@ class Dispatcher {
         }
     }
 
+    // Проверяем не погиб ли наш скаут
     isScoutDead() {
         for (const robot of this.robots) {
             if (robot.role === ROLE_SCOUT && robot.x === -1 && robot.y === -1) {
@@ -94,6 +106,8 @@ class Dispatcher {
         return false;
     }
 
+    // Список живых роботов
+    // Второе условие с ошибкой, но по первому всё равно фильтрует правильно
     getAliveRobot() {
         return this.robots.find((r) => r.x !== -1 && r.x !== -2);
     }
@@ -102,13 +116,18 @@ class Dispatcher {
 class Robot {
     constructor(id) {
         this.id = id;
+        // Изначально скаут выбирается именно так
         this.role = (id === 0) ? ROLE_SCOUT : ROLE_DIGGER;
 
         this.poi = { x: 12, y: 6 };
 
+        // Этот режим был вместо режима PROSPECTOR - пока скаут получает радар и едет
+        // с ним на точку, роботы собираются вокруг точки закладки радара
+        // (чтобы быстрее приступить к добыче)
         this.mode = (id === 0) ? '' : 'MOVE_AND_WAIT';
     }
 
+    // Ставит POI робота на клетку с рудой, соответствующую его номеру
     setPoiToMyVein() {
         const veins = findVeins(this.map);
         const myPriority = this.getMyPriority();
@@ -123,11 +142,14 @@ class Robot {
         return this.x === -1 && this.y === -1;
     }
 
+    // При смене роли режим обнуляется. Общих режимов у ролей всё равно нет.
     setRole(role) {
         this.role = role;
         this.mode = '';
     }
 
+    // Устанавливает POI когда нет разведанной руды. 
+    // Роботы встают "крестом" вокруг POI лидера (для копателей это скаут)
     setBackupPoi() {
         if (this.leader && this.leader.poi && this.leader.poi.x > 0) {
             this.mode = 'PROSPECTING';
@@ -162,6 +184,9 @@ class Robot {
         return this.poi && (this.x === this.poi.x && this.y === this.poi.y);
     }
 
+    // Можно ли копать на POI с текущей позиции.
+    // В первом варианте (выше) роботы заезжали прямо на POI прежде чем копать.
+    // Это не самый эффективный вариант
     poiReachable() {
         return dist(this, this.poi) <= 1;
     }
@@ -180,12 +205,17 @@ class Robot {
         this.map = map;
     }
 
+    // Здесь одним большим куском лежат деревья выбора для ролей
+    // Я думал их разбить на отдельные методы, но руки так и не дошли
     getCommand() {
         if (this.x === -1 && this.y === -1) {
             return 'WAIT'; // Don't waste time on dead
         }
         switch (this.role) {
+        // Скаут. Берёт радар, закапывает его
         case ROLE_SCOUT:
+            // После закапывания выкапывает руду по дороге,
+            // чтобы не возвращаться порожняком
             if (this.mode === 'DIG_AFTER_SCOUTING') {
                 if (this.item === -1) {
                     this.setPoiToMyVein();
@@ -231,6 +261,11 @@ class Robot {
             this.mode = 'DIG_AFTER_SCOUTING';
             // Remove WAIT_FOR_ORE mode so if no ore is found, diggers will follow Scout
             return `DIG ${this.poi.x} ${this.poi.y}`;
+        /* Копатель. Режимы:
+         * WAIT_FOR_ORE - сгрудиться вокруг будущей точки закладки радара и ждать 
+         * MOVE_AND_WAIT - ехать к точке закладки радара (как доехали, перейти в режим WAIT_FOR_ORE)
+         * PROSPECTING - случайное копание, пока радар не показал клеток с рудой
+         */
         case ROLE_DIGGER:
             if (this.mode === 'WAIT_FOR_ORE') {
                 const result = this.setPoiToMyVein();
